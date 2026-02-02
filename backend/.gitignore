@@ -1,0 +1,51 @@
+# --- Byte-compiled / optimized / DLL files ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Environments ---
+# It's best practice to never commit your virtual environment
+.venv/
+venv/
+ENV/
+env/
+bin/
+lib/
+include/
+
+# --- Environment Variables (CRITICAL) ---
+# This protects your API keys and database credentials
+.env
+.flaskenv
+
+# --- Distribution / Packaging ---
+dist/
+build/
+*.egg-info/
+nosync/
+
+# --- Unit test / Coverage reports ---
+htmlcov/
+.tox/
+.nox/
+.coverage
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# --- Jupyter Notebooks ---
+.ipynb_checkpoints
+
+# --- IDE Specific Files ---
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# --- Project Specific (Example: Django/Next.js) ---
+# Since you use Django for your backend:
+db.sqlite3
+media/
+staticfiles/
