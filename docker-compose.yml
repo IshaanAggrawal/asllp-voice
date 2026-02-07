@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15
+    container_name: voicedb
+    environment:
+      POSTGRES_DB: voicedb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - voice-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: voice-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - voice-network
+
+  # Django REST API
+  django:
+    build:
+      context: ./backend/django_app
+      dockerfile: ../Dockerfile.django
+    container_name: django-api
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend/django_app:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - voice-network
+
+  # FastAPI WebSocket Server
+  fastapi:
+    build:
+      context: ./backend/fastapi_app
+      dockerfile: ../Dockerfile.fastapi
+    container_name: fastapi-websocket
+    command: uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+    volumes:
+      - ./backend/fastapi_app:/app
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./backend/.env
+    depends_on:
+      - redis
+      - django
+    networks:
+      - voice-network
+
+  # Next.js Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nextjs-frontend
+    command: npm run dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_DJANGO_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_FASTAPI_WS_URL=ws://localhost:8001
+    depends_on:
+      - django
+      - fastapi
+    networks:
+      - voice-network
+
+volumes:
+  postgres_data:
+
+networks:
+  voice-network:
+    driver: bridge
