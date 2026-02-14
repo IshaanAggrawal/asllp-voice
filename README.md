@@ -121,15 +121,15 @@ Access the app at: **http://localhost:8501**
 
 ```mermaid
 graph TD
-    User[User Microphone] -->|WebSocket Audio| FastAPI[FastAPI Server]
-    FastAPI -->|Stream| Deepgram[Deepgram STT]
-    Deepgram -->|Text| Orchestrator[Qwen 1.5B (Intent)]
-    Orchestrator -->|Intent + Context| Responder[LLaMA 1B (Response)]
-    Responder -->|Text Response| Cartesia[Cartesia TTS]
-    Cartesia -->|Audio Stream| User
+    U[User Microphone] -->|WebSocket Audio| F[FastAPI Server]
+    F -->|Stream| DG[Deepgram STT]
+    DG -->|Text| O[Orchestrator - Qwen 1_5B Intent]
+    O -->|Intent + Context| R[Responder - LLaMA 3_2 1B]
+    R -->|Text Response| C[Cartesia TTS]
+    C -->|Audio Stream| U
     
-    FastAPI -.->|Async Log| Django[Django ORM]
-    Django <-->|Persist| DB[(PostgreSQL/SQLite)]
+    F -.->|Async Log| DJ[Django Backend]
+    DJ <-->|Persist| DB[(PostgreSQL)]
 ```
 
 ## 📄 License
