@@ -145,6 +145,12 @@ st.markdown("""
         color: white;
     }
 
+    /* Reduce default Streamlit padding */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 2rem !important;
+    }
+
     /* Hide default sidebar nav (fallback) */
     [data-testid="stSidebarNav"] {
         display: none !important;

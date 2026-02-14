@@ -87,7 +87,7 @@ async def save_log_async(session_id, speaker, text, intent=None, latency=None):
         logger.error(f"Failed to save log: {e}")
 
 
-async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_list, start_time=None):
+async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_list, activity_state):
     """
     Process accumulated transcripts after a delay.
     This allows multiple speech segments to be combined into one turn.
@@ -101,6 +101,9 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
     
     # Save USER log
     await save_log_async(voice_agent.session_id, 'user', combined_transcript)
+    
+    # Mark activity start
+    activity_state['last_active'] = asyncio.get_event_loop().time()
     
     # ===== AI Agent Processing =====
     process_start = asyncio.get_event_loop().time()
@@ -125,6 +128,9 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
         "timestamp": datetime.now().isoformat()
     })
     
+    # Mark activity after text response
+    activity_state['last_active'] = asyncio.get_event_loop().time()
+    
     # ===== Text-to-Speech =====
     try:
         # FIX: Use voice_id from agent config
@@ -141,6 +147,9 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
                 "format": "wav",
                 "timestamp": datetime.now().isoformat()
             })
+            # Mark activity after audio response
+            activity_state['last_active'] = asyncio.get_event_loop().time()
+            
     except Exception as e:
         logger.debug(f"TTS synthesis skipped or failed: {e}")
 
@@ -162,7 +171,6 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
     
     # Initialize voice agent for this session
     voice_agent = VoiceAgent(session_id)
-    ollama_client = OllamaClient()
     deepgram = get_deepgram()
     cartesia = get_cartesia()
     
@@ -176,8 +184,11 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
     })
     
     
-    # Track consecutive empty transcript chunks for silence detection
-    last_speech_time = asyncio.get_event_loop().time()
+    # Track activity for smart silence detection
+    # We use a mutable dict so it can be updated by the processing task
+    activity_state = {
+        'last_active': asyncio.get_event_loop().time()
+    }
     
     # Transcript buffering: accumulate transcripts for 2s before processing
     transcript_buffer = []
@@ -193,7 +204,16 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                     timeout=SILENCE_TIMEOUT_SECONDS
                 )
             except asyncio.TimeoutError:
-                # No data received for SILENCE_TIMEOUT_SECONDS
+                # Check if there was recent activity (e.g., agent speaking)
+                # that update()d the shared state
+                elapsed_since_active = asyncio.get_event_loop().time() - activity_state['last_active']
+                
+                if elapsed_since_active < SILENCE_TIMEOUT_SECONDS:
+                    # Agent was active recently, so we extend the session
+                    # logger.info(f"Silence timeout triggered, but agent was active {elapsed_since_active:.1f}s ago. Continuing.")
+                    continue
+                
+                # Truly no activity
                 logger.info(f"Silence timeout ({SILENCE_TIMEOUT_SECONDS}s) — auto-ending session {session_id}")
                 await websocket.send_json({
                     "type": "session_timeout",
@@ -203,6 +223,9 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                 break
             
             message = json.loads(data)
+            
+            # Reset activity on any user message
+            activity_state['last_active'] = asyncio.get_event_loop().time()
             
             message_type = message.get("type")
             # logger.info(f"Received message type: {message_type}")
@@ -235,20 +258,10 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                 transcript = await deepgram.transcribe(audio_data, mime_type="audio/webm")
                 
                 if not transcript:
-                    # Check if silence has exceeded the timeout
-                    elapsed_silence = asyncio.get_event_loop().time() - last_speech_time
-                    if elapsed_silence >= SILENCE_TIMEOUT_SECONDS:
-                        logger.info(f"No speech for {elapsed_silence:.1f}s — auto-ending session {session_id}")
-                        await websocket.send_json({
-                            "type": "session_timeout",
-                            "message": f"No speech detected for {SILENCE_TIMEOUT_SECONDS} seconds. Session ended automatically.",
-                            "reason": "silence_timeout"
-                        })
-                        break
                     continue
                 
-                # Speech detected — reset silence timer
-                last_speech_time = asyncio.get_event_loop().time()
+                # Speech detected — reset activity
+                activity_state['last_active'] = asyncio.get_event_loop().time()
                 
                 logger.info(f"Transcript: {transcript}")
                 
@@ -276,7 +289,9 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                         # Process the buffer
                         buffer_copy = transcript_buffer.copy()
                         transcript_buffer.clear()
-                        await process_transcript_buffer(websocket, voice_agent, cartesia, buffer_copy)
+                        
+                        # Process and get response, passing the shared activity state
+                        await process_transcript_buffer(websocket, voice_agent, cartesia, buffer_copy, activity_state)
                 
                 transcript_task = asyncio.create_task(delayed_process())
                 
@@ -298,6 +313,9 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                     "text": response,
                     "timestamp": datetime.now().isoformat()
                 })
+                
+                # Mark agent activity
+                activity_state['last_active'] = asyncio.get_event_loop().time()
                 
             elif message_type == "end_stream":
                 logger.info(f"Ending stream for session: {session_id}")
