@@ -22,30 +22,18 @@ def show_dashboard_page():
         return
     
     # Header with user context
+    user = st.session_state.user_data
+    display_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('username', 'User')
+    
     st.markdown(f"""
     <div style='text-align: center; margin: 2rem 0 3rem 0;'>
-        <div class='gradient-text'>🏠 Welcome, {st.session_state.user_data.get('username', 'User')}!</div>
+        <div class='gradient-text'>🏠 Welcome, {display_name}!</div>
         <p style='color: var(--text-secondary); font-size: 1.1rem; margin-top: 0.5rem;'>
             Your personal AI voice orchestration dashboard
         </p>
     </div>
     """, unsafe_allow_html=True)
     
-    
-    # Logout button
-    col1, col2, col3 = st.columns([3, 1, 3])
-    with col2:
-        if st.button("🚪 Logout", type="secondary", use_container_width=True):
-            # Clear all session state
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            
-            # Reinitialize to login page
-            st.session_state.current_page = 'login'
-            st.session_state.authenticated = False
-            st.success("✅ Logged out successfully!")
-            time.sleep(1)
-            st.rerun()
     
     st.divider()
 

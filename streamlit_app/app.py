@@ -1,9 +1,9 @@
 """
 Professional Streamlit App with Industry-Level Security
-- JWT Authentication with automatic token refresh
+- JWT Authentication with persistence
 - User isolation (agents/sessions per user)
 - Security headers and session management
-- Professional UI with loading states and error handling
+- Professional Black & White UI
 """
 
 import streamlit as st
@@ -13,29 +13,28 @@ from utils.api import login_user, get_current_user
 
 # Page configuration - must be first Streamlit command
 st.set_page_config(
-    page_title="AI Voice Orchestration Platform",
+    page_title="Voice Orchestration Platform",
     page_icon="🎙️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for ElevenLabs-inspired UI
+# Custom CSS for Professional Black & White UI
 st.markdown("""
 <style>
-    /* ElevenLabs-inspired Dark Theme */
+    /* Professional Monochrome Theme */
     :root {
-        --primary-purple: #A855F7;
-        --secondary-blue: #3B82F6;
-        --dark-bg: #0F0F1E;
-        --card-bg: rgba(255, 255, 255, 0.05);
-        --glass-bg: rgba(255, 255, 255, 0.08);
+        --bg-color: #000000;
+        --card-bg: #111111;
         --text-primary: #FFFFFF;
-        --text-secondary: #A1A1AA;
+        --text-secondary: #888888;
+        --accent: #FFFFFF;
+        --border: #333333;
     }
     
     /* Global dark theme */
     .stApp {
-        background: linear-gradient(135deg, #0F0F1E 0%, #1A1A2E 50%, #16213E 100%);
+        background-color: var(--bg-color);
         color: var(--text-primary);
     }
     
@@ -44,131 +43,113 @@ st.markdown("""
     footer {visibility: hidden;}
     header {visibility: hidden;}
     
-    /* Top navigation bar with user indicator */
-    .top-nav {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        background: rgba(15, 15, 30, 0.8);
-        backdrop-filter: blur(10px);
-        border-bottom: 1px solid rgba(168, 85, 247, 0.2);
-        padding: 1rem 2rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        z-index: 1000;
-    }
-    
+    /* Top navigation user badge */
     .user-badge {
-        background: linear-gradient(135deg, #A855F7 0%, #3B82F6 100%);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
         padding: 0.5rem 1.5rem;
-        border-radius: 25px;
-        color: white;
-        font-weight: 600;
+        border-radius: 4px;
+        color: var(--text-primary);
+        font-weight: 500;
         font-size: 0.9rem;
-        box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
     }
     
-    /* Glassmorphism cards */
+    /* Minimalist cards */
     .glass-card {
-        background: var(--glass-bg);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        border-radius: 16px;
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
         padding: 2rem;
-        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-        transition: all 0.3s ease;
+        transition: all 0.2s ease;
     }
     
     .glass-card:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 12px 40px rgba(168, 85, 247, 0.2);
-        border-color: rgba(168, 85, 247, 0.3);
+        border-color: var(--text-primary);
     }
     
-    /* Modern gradient headers */
+    /* Typography */
     .gradient-text {
-        background: linear-gradient(135deg, #A855F7 0%, #3B82F6 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
+        color: var(--text-primary);
         font-weight: 700;
         font-size: 2.5rem;
         margin-bottom: 0.5rem;
+        letter-spacing: -1px;
     }
     
-    /* Streamlit component styling */
+    /* Input styling */
     .stTextInput > div > div > input {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(168, 85, 247, 0.2);
-        border-radius: 12px;
+        background: #000000;
+        border: 1px solid var(--border);
+        border-radius: 6px;
         color: white;
         padding: 0.75rem 1rem;
-        font-size: 1rem;
     }
     
     .stTextInput > div > div > input:focus {
-        border-color: #A855F7;
-        box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.2);
+        border-color: white;
+        box-shadow: none;
     }
     
-    /* Modern buttons */
+    /* Button styling */
     .stButton > button {
-        background: linear-gradient(135deg, #A855F7 0%, #3B82F6 100%);
-        color: white;
-        border: none;
-        border-radius: 12px;
-        padding: 0.75rem 2rem;
+        background: white;
+        color: black;
+        border: 1px solid white;
+        border-radius: 6px;
+        padding: 0.6rem 2rem;
         font-weight: 600;
-        font-size: 1rem;
-        transition: all 0.3s ease;
-        box-shadow: 0 4px 15px rgba(168, 85, 247, 0.3);
+        transition: all 0.2s;
     }
     
     .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(168, 85, 247, 0.4);
+        background: #dddddd;
+        border-color: #dddddd;
+        color: black;
+        transform: translateY(-1px);
+    }
+    
+    /* Secondary button styling */
+    button[kind="secondary"] {
+        background: transparent;
+        color: white;
+        border: 1px solid var(--border);
+    }
+    
+    button[kind="secondary"]:hover {
+        border-color: white;
     }
     
     /* Sidebar styling */
     section[data-testid="stSidebar"] {
-        background: rgba(15, 15, 30, 0.95);
-        backdrop-filter: blur(10px);
-        border-right: 1px solid rgba(168, 85, 247, 0.2);
+        background: #050505;
+        border-right: 1px solid var(--border);
     }
     
     section[data-testid="stSidebar"] .stButton > button {
-        background: rgba(168, 85, 247, 0.1);
-        border: 1px solid rgba(168, 85, 247, 0.3);
-        color: white;
+        background: transparent;
+        border: none;
+        color: #888888;
+        text-align: left;
+        padding-left: 0;
     }
     
     section[data-testid="stSidebar"] .stButton > button:hover {
-        background: rgba(168, 85, 247, 0.2);
-        border-color: #A855F7;
+        color: white;
+        background: transparent;
     }
     
     /* Success/Error messages */
     .stAlert {
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 12px;
-        border-left: 4px solid #A855F7;
-    }
-    
-    /* Form styling */
-    .stForm {
-        background: var(--glass-bg);
-        border-radius: 16px;
-        padding: 2rem;
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: var(--card-bg);
+        border: 1px solid var(--border);
+        color: white;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state with security context
+# Initialize session state with persistence check
 def init_session_state():
-    """Initialize all session state variables with security defaults"""
+    """Initialize session state and check for persistent auth"""
     defaults = {
         'authenticated': False,
         'access_token': None,
@@ -179,12 +160,36 @@ def init_session_state():
         'selected_session': None,
         'conversation_history': [],
         'last_activity': None,
-        'session_timeout': 3600,  # 1 hour in seconds
+        'session_timeout': 3600,
     }
     
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
+            
+    # Auth Persistence: Check URL query params for token if not authenticated
+    if not st.session_state.authenticated:
+        try:
+            params = st.query_params
+            token = params.get("token")
+            if token:
+                # Verify token
+                result = get_current_user(token)
+                if result and result.get('success'):
+                    st.session_state.authenticated = True
+                    st.session_state.access_token = token
+                    st.session_state.user_data = result.get('data', {})
+                    st.session_state.last_activity = time.time()
+        except Exception:
+            pass
+            
+    # Ensure token stays in URL if authenticated (fixes refresh logout issue)
+    if st.session_state.authenticated and st.session_state.access_token:
+        # Check if token is in params, if not, add it back
+        # This prevents the token from disappearing during navigation
+        current_token = st.query_params.get("token")
+        if current_token != st.session_state.access_token:
+            st.query_params["token"] = st.session_state.access_token
 
 # Security: Check session timeout
 def check_session_timeout():
@@ -227,93 +232,85 @@ def logout():
     st.session_state.selected_session = None
     st.session_state.conversation_history = []
     st.session_state.current_page = 'home'
+    st.query_params.clear()
 
 # Professional sidebar with user context
 def render_sidebar():
     """Render modern sidebar with user indicator"""
-    # Top user indicator (appears at top right of main content)
+
+    # Top user indicator with Logout
     if st.session_state.authenticated:
+        # Refresh user data to ensure we have the latest name
+        # We only do this if we suspect data is stale or on full reruns, 
+        # but to be safe and fix the "User" name bug immediately without re-login:
+        if 'last_user_fetch' not in st.session_state or (time.time() - st.session_state.get('last_user_fetch', 0) > 300):
+             result = get_current_user(st.session_state.access_token)
+             if result.get('success'):
+                 st.session_state.user_data = result.get('data', {})
+                 st.session_state.last_user_fetch = time.time()
+
+        user = st.session_state.user_data
+        display_name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or user.get('username', 'User')
+        
+        # User Badge (Fixed Top Right)
         st.markdown(f"""
-        <div style='position: fixed; top: 1rem; right: 2rem; z-index: 9999;'>
-            <div class='user-badge'>
-                👤 {st.session_state.user_data.get('username', 'User')}
+        <div style='position: fixed; top: 1.5rem; right: 2rem; z-index: 9999; display: flex; align-items: center;'>
+            <div class='user-badge' style='background: #111; border: 1px solid #333; color: white;'>
+                👤 <span style='color: #4ade80;'>{display_name}</span>
             </div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with st.sidebar:
         # App branding
         st.markdown("""
-        <div style='text-align: center; padding: 2rem 1rem; margin-bottom: 2rem;'>
-            <div class='gradient-text' style='font-size: 1.8rem;'>🎙️ VoiceAI</div>
-            <p style='color: var(--text-secondary); font-size: 0.85rem; margin-top: 0.5rem;'>
-                Powered by ElevenLabs Technology
-            </p>
+        <div style='padding: 2rem 0; margin-bottom: 2rem;'>
+            <div style='font-size: 1.5rem; font-weight: 700; color: white; letter-spacing: -1px;'>Voice Orchestrator</div>
+            <div style='font-size: 0.8rem; color: #666; margin-top: 5px;'>ENTERPRISE EDITION</div>
         </div>
         """, unsafe_allow_html=True)
         
         if st.session_state.authenticated:
-            st.divider()
+            st.markdown("##### MAIN MENU")
             
-            # Navigation with icons
-            st.markdown("### 📱 Navigation")
-            
-            if st.button("🏠 Dashboard", use_container_width=True, key="nav_dashboard"):
+            if st.button("📊 Dashboard", use_container_width=True, key="nav_dashboard"):
                 st.session_state.current_page = 'dashboard'
                 st.rerun()
             
-            if st.button("📋 My Agents", use_container_width=True, key="nav_agents"):
+            if st.button("🤖 My Agents", use_container_width=True, key="nav_agents"):
                 st.session_state.current_page = 'agents'
                 st.rerun()
             
-            if st.button("➕ Create Agent", use_container_width=True, key="nav_create"):
+            if st.button("➕ New Agent", use_container_width=True, key="nav_create"):
                 st.session_state.current_page = 'create_agent'
                 st.rerun()
             
-            if st.button("📞 Voice Call", use_container_width=True, key="nav_call"):
+            if st.button("🎙️ Voice Terminal", use_container_width=True, key="nav_call"):
                 st.session_state.current_page = 'call'
                 st.rerun()
             
-            if st.button("📋 Sessions", use_container_width=True, key="nav_sessions"):
+            if st.button("📝 Session Logs", use_container_width=True, key="nav_sessions"):
                 st.session_state.current_page = 'sessions'
                 st.rerun()
             
             st.divider()
             
-            # Session info
-            if st.session_state.last_activity:
-                remaining_mins = int((st.session_state.session_timeout - (time.time() - st.session_state.last_activity)) / 60)
-                st.markdown(f"""
-                <div style='font-size: 0.75rem; color: var(--text-secondary); text-align: center;'>
-                    ⏱️ Session expires in {remaining_mins} min
-                </div>
-                """, unsafe_allow_html=True)
-            
             st.divider()
             
-            # Logout button
-            if st.button("🚪 Logout", type="primary", use_container_width=True, key="logout_btn"):
+            # Logout
+            if st.button("Log out", use_container_width=True, key="logout_btn"):
                 logout()
-                st.success("Logged out successfully!")
-                time.sleep(1)
                 st.rerun()
         
         else:
             # Not authenticated
-            st.markdown("""
-            <div class='glass-card' style='text-align: center; padding: 1.5rem;'>
-                <div style='font-size: 2.5rem; margin-bottom: 1rem;'>🔐</div>
-                <div style='color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 1.5rem;'>
-                    Please login to access the platform
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.info("System Locked. Please authenticate.")
             
-            if st.button("🔐 Login", type="primary", use_container_width=True, key="nav_login"):
+            if st.button("Login", type="primary", use_container_width=True, key="nav_login"):
                 st.session_state.current_page = 'login'
                 st.rerun()
             
-            if st.button("📝 Register", use_container_width=True, key="nav_register"):
+            if st.button("Register Account", use_container_width=True, key="nav_register"):
                 st.session_state.current_page = 'register'
                 st.rerun()
 
@@ -380,3 +377,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

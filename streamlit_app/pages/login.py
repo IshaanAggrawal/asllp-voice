@@ -148,6 +148,8 @@ def show_login_page():
                                 
                                 time.sleep(1)
                                 st.session_state.current_page = 'dashboard'
+                                # Persistence: Set token in URL
+                                st.query_params["token"] = result.get('access_token')
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to retrieve user profile")

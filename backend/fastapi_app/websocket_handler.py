@@ -4,6 +4,22 @@ import logging
 import base64
 import asyncio
 from datetime import datetime
+import os
+import sys
+
+# Setup Django ORM for direct DB access
+sys.path.append(os.path.join(os.path.dirname(__file__), '../django_app'))
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
+
+try:
+    import django
+    django.setup()
+    from agents.models import ConversationLog, ConversationSession
+    from asgiref.sync import sync_to_async
+    DJANGO_AVAILABLE = True
+except Exception as e:
+    logging.error(f"Failed to setup Django ORM: {e}")
+    DJANGO_AVAILABLE = False
 
 # Import AI agents
 from agents.voice_agent import VoiceAgent
@@ -33,13 +49,45 @@ def get_cartesia():
 
 
 # Silence timeout: auto-end session if no data for this many seconds
-SILENCE_TIMEOUT_SECONDS = 15
+SILENCE_TIMEOUT_SECONDS = 30  # Increased to 30s based on user feedback
 
 # Transcript buffer delay: wait this long before processing accumulated transcripts
 TRANSCRIPT_BUFFER_DELAY = 2.0  # 2 seconds
 
 
-async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_list):
+async def save_log_async(session_id, speaker, text, intent=None, latency=None):
+    """Save conversation log to database asynchronously"""
+    if not DJANGO_AVAILABLE:
+        return
+        
+    try:
+        # We need to wrap DB operations in sync_to_async
+        @sync_to_async
+        def _create_log():
+            try:
+                session = ConversationSession.objects.get(id=session_id)
+                ConversationLog.objects.create(
+                    session=session,
+                    speaker=speaker,
+                    transcript=text,
+                    intent=intent,
+                    latency_ms=latency
+                )
+                
+                # Update total turns
+                session.total_turns += 1
+                session.save()
+            except ConversationSession.DoesNotExist:
+                logger.warning(f"Session {session_id} not found for logging")
+            except Exception as e:
+                logger.error(f"DB Log Error: {e}")
+                
+        await _create_log()
+    except Exception as e:
+        logger.error(f"Failed to save log: {e}")
+
+
+async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_list, start_time=None):
     """
     Process accumulated transcripts after a delay.
     This allows multiple speech segments to be combined into one turn.
@@ -51,14 +99,24 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
     combined_transcript = " ".join(buffer_list)
     logger.info(f"Processing buffered transcript: {combined_transcript}")
     
+    # Save USER log
+    await save_log_async(voice_agent.session_id, 'user', combined_transcript)
+    
     # ===== AI Agent Processing =====
+    process_start = asyncio.get_event_loop().time()
     try:
         response = await voice_agent.process_turn(combined_transcript)
     except Exception as e:
         logger.error(f"Agent processing failed: {e}")
         response = "I'm sorry, I couldn't process that. Could you try again?"
     
+    process_end = asyncio.get_event_loop().time()
+    latency_ms = int((process_end - process_start) * 1000)
+    
     logger.info(f"Agent response: {response[:100]}")
+    
+    # Save AGENT log
+    await save_log_async(voice_agent.session_id, 'agent', response, latency=latency_ms)
     
     # Send text response
     await websocket.send_json({
@@ -69,7 +127,11 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
     
     # ===== Text-to-Speech =====
     try:
-        audio_bytes = await cartesia.synthesize(response)
+        # FIX: Use voice_id from agent config
+        voice_id = voice_agent.agent_config.get('voice_id')
+        logger.info(f"Synthesizing with voice_id: {voice_id}")
+        
+        audio_bytes = await cartesia.synthesize(response, voice_id=voice_id)
         
         if audio_bytes and len(audio_bytes) > 0:
             audio_base64_out = base64.b64encode(audio_bytes).decode('utf-8')
@@ -143,14 +205,13 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
             message = json.loads(data)
             
             message_type = message.get("type")
-            logger.info(f"Received message type: {message_type}")
+            # logger.info(f"Received message type: {message_type}")
             
             if message_type == "audio_chunk":
                 # ===== STEP 1: Decode audio from browser =====
                 audio_base64 = message.get("data", "")
                 
                 if not audio_base64:
-                    logger.warning("Empty audio chunk received")
                     continue
                 
                 try:
@@ -161,10 +222,7 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                 
                 # Skip tiny chunks (likely silence or headers only)
                 if len(audio_data) < 500:
-                    logger.debug(f"Audio chunk too small ({len(audio_data)} bytes), skipping")
                     continue
-                
-                logger.info(f"Processing audio chunk: {len(audio_data)} bytes")
                 
                 # Send processing indicator
                 await websocket.send_json({
@@ -177,7 +235,6 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                 transcript = await deepgram.transcribe(audio_data, mime_type="audio/webm")
                 
                 if not transcript:
-                    logger.info("No speech detected in audio chunk")
                     # Check if silence has exceeded the timeout
                     elapsed_silence = asyncio.get_event_loop().time() - last_speech_time
                     if elapsed_silence >= SILENCE_TIMEOUT_SECONDS:
@@ -195,62 +252,46 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                 
                 logger.info(f"Transcript: {transcript}")
                 
-                # Send transcript to frontend
+                # Send transcript to frontend immediately (for display)
                 await websocket.send_json({
                     "type": "transcript",
                     "text": transcript,
                     "is_final": True
                 })
                 
-                # ===== STEP 3: Dual-Layer AI Agent Processing =====
-                # Qwen orchestrator classifies intent -> LLaMA responder generates reply
-                try:
-                    response = await voice_agent.process_turn(transcript)
-                except Exception as e:
-                    logger.error(f"Agent processing failed: {e}")
-                    response = "I'm sorry, I couldn't process that. Could you try again?"
+                # ===== BUFFERED PROCESSING =====
+                # Add to buffer and schedule processing after 2s delay
+                transcript_buffer.append(transcript)
+                last_transcript_time = asyncio.get_event_loop().time()
                 
-                logger.info(f"Agent response: {response[:100]}")
+                # Cancel previous processing task if exists (user is still speaking)
+                if transcript_task and not transcript_task.done():
+                    transcript_task.cancel()
                 
-                # Send text response immediately
-                await websocket.send_json({
-                    "type": "agent_response",
-                    "text": response,
-                    "timestamp": datetime.now().isoformat()
-                })
+                # Schedule new processing task after delay
+                async def delayed_process():
+                    await asyncio.sleep(TRANSCRIPT_BUFFER_DELAY)
+                    # Check if more transcripts came in during the delay
+                    if asyncio.get_event_loop().time() - last_transcript_time >= TRANSCRIPT_BUFFER_DELAY:
+                        # Process the buffer
+                        buffer_copy = transcript_buffer.copy()
+                        transcript_buffer.clear()
+                        await process_transcript_buffer(websocket, voice_agent, cartesia, buffer_copy)
                 
-                # ===== STEP 4: Text-to-Speech with Cartesia =====
-                try:
-                    audio_bytes = await cartesia.synthesize(response)
-                    
-                    if audio_bytes and len(audio_bytes) > 0:
-                        audio_base64_out = base64.b64encode(audio_bytes).decode('utf-8')
-                        await websocket.send_json({
-                            "type": "audio_response",
-                            "audio": audio_base64_out,
-                            "format": "wav",
-                            "timestamp": datetime.now().isoformat()
-                        })
-                        logger.info(f"Sent {len(audio_bytes)} bytes of TTS audio")
-                    else:
-                        logger.warning("No audio generated from TTS")
-                except Exception as e:
-                    logger.error(f"TTS failed: {e}")
-                    # Text response already sent, just log the TTS error
+                transcript_task = asyncio.create_task(delayed_process())
                 
             elif message_type == "text_message":
                 # Handle text-only messages (for testing without audio)
                 text = message.get("text", "")
-                logger.info(f"Received text message: {text}")
+                await save_log_async(session_id, 'user', text)
                 
-                # Process through voice agent for consistency
+                # Process through voice agent
                 try:
                     response = await voice_agent.process_turn(text)
                 except Exception:
-                    response = await ollama_client.generate_response(
-                        prompt=text,
-                        model="llama3.2:1b"
-                    )
+                    response = "Error processing text."
+                
+                await save_log_async(session_id, 'agent', response)
                 
                 await websocket.send_json({
                     "type": "agent_response",
@@ -270,16 +311,14 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                 # Receive agent configuration from frontend
                 config = message.get("config", {})
                 voice_agent.update_config(config)
-                logger.info(f"Received agent config: {config.get('name')}")
+                logger.info(f"Received agent config with voice_id: {config.get('voice_id')}")
                 
             else:
-                logger.warning(f"Unknown message type: {message_type}")
+                pass
                 
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Error in voice stream handler: {error_msg}")
-        import traceback
-        logger.error(traceback.format_exc())
         
         # Only try to send error if connection is still open
         try:
@@ -288,8 +327,7 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                 "message": f"Stream error: {error_msg}"
             })
         except Exception:
-            # Connection likely already closed or broken
-            logger.warning(f"Could not send error message to client: client disconnected")
+            pass
 
 
 async def synthesize_and_send_audio(websocket: WebSocket, text: str):
