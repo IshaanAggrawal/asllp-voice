@@ -1,482 +1,136 @@
-﻿# 🎙️ Real-Time AI Voice Orchestration System
+﻿# 🎙️ Real-Time AI Voice Orchestration Platform
 
-A modular, production-ready platform for creating and deploying AI voice agents with human-like, low-latency interactions.
+A production-grade system for creating and managing AI voice agents with real-time speech-to-speech interaction. Built with a dual-LLM architecture (Qwen + LLaMA) and ultra-low latency voice pipeline.
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Django](https://img.shields.io/badge/django-5.0-green.svg)](https://www.djangoproject.com/)
-[![FastAPI](https://img.shields.io/badge/fastapi-0.100+-teal.svg)](https://fastapi.tiangolo.com/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+## 🚀 Key Features
 
----
+### 🧠 Dual-Model Intelligence
+*   **Orchestrator (Qwen 1.5B)**: Fast intent classification and routing.
+*   **Responder (LLaMA 3.2 1B)**: Natural, context-aware conversational responses.
 
-## 📋 Table of Contents
+### ⚡ Ultra-Low Latency Pipeline
+*   **Deepgram Nova-2**: Industry-leading Speech-to-Text (STT).
+*   **Cartesia Sonic**: Hyper-realistic Text-to-Speech (TTS) with <100ms latency.
+*   **WebSocket Streaming**: Full duplex audio for real-time interaction.
+*   **Smart Timeout**: 15s post-speech timeout with barge-in support.
 
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Tech Stack](#-tech-stack)
-- [Quick Start](#-quick-start)
-- [API Documentation](#-api-documentation)
-- [Project Structure](#-project-structure)
-- [Configuration](#-configuration)
-- [Testing](#-testing)
-- [Deployment](#-deployment)
+### 🛡️ Enterprise Architecture
+*   **User Isolation**: Strict data segregation (agents, sessions, logs).
+*   **Secure Auth**: JWT-based authentication with auto-refresh.
+*   **Robust Backend**: Django (Data/User) + FastAPI (Real-time).
 
----
+### 📊 Professional Dashboard
+*   **Agent Management**: Create/Edit custom system prompts.
+*   **Real-time Analytics**: Monitor session status and duration.
+*   **Live Transcripts**: View logs as they happen.
 
-## ✨ Features
+## 🏗️ Technical Stack
 
-### Core Capabilities
+- **Frontend**: Streamlit (Reactive UI)
+- **Backend API**: Django REST Framework
+- **Real-time Server**: FastAPI + Uvicorn
+- **Database**: PostgreSQL (via Django ORM)
+- **AI Inference**: Ollama (Local LLMs)
+- **Voice APIs**: Deepgram, Cartesia
 
-- **🤖 Custom Agent Builder** - Create AI agents with unique personalities via custom system prompts
-- **⚡ Real-Time Streaming** - WebSocket-based voice calls with sub-second latency
-- **🧠 Dual-LLM Architecture** - Qwen orchestrator + LLaMA responder for intelligent conversations
-- **🎯 Modular Design** - Clean separation between logic (orchestrator) and personality (responder)
-- **🔐 Secure Authentication** - JWT-based auth with user isolation
-- **📊 Session Management** - Track and manage all voice conversations
-- **🎨 Modern UI** - Streamlit-based interface with glassmorphism design
-
-### Voice Processing
-
-- **Speech-to-Text**: Deepgram API for accurate transcription
-- **Text-to-Speech**: Cartesia API + Browser TTS fallback
-- **Smart Buffering**: 2-second transcript accumulation for natural conversation flow
-- **Silence Detection**: Automatic session timeout after 15 seconds of inactivity
-
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│              Streamlit Frontend (Port 8501)         │
-│     Authentication • Agent Builder • Dashboard      │
-└────────────────┬──────────────────┬─────────────────┘
-                 │                  │
-            HTTP/REST          WebSocket
-                 │                  │
-    ┌────────────▼────────┐  ┌──────▼──────────────┐
-    │  Django Backend     │  │  FastAPI Backend    │
-    │    (Port 8000)      │  │    (Port 8001)      │
-    │                     │  │                     │
-    │ • User Auth (JWT)   │  │ • Voice Streaming   │
-    │ • Agent CRUD        │  │ • AI Orchestration  │
-    │ • PostgreSQL ORM    │  │ • STT/TTS Pipeline  │
-    └─────────────────────┘  └──────┬──────────────┘
-                                    │
-                      ┌─────────────┴─────────────┐
-                      │                           │
-                      ▼                           ▼
-               ┌──────────────┐          ┌────────────────┐
-               │   Ollama     │          │  External APIs │
-               │              │          │                │
-               │ • Qwen 1.5B  │          │ • Deepgram STT │
-               │ • LLaMA 1B   │          │ • Cartesia TTS │
-               └──────────────┘          └────────────────┘
-```
-
-### Why This Architecture?
-
-- **Django**: Handles stateful operations (auth, database, CRUD) - synchronous, reliable
-- **FastAPI**: Handles real-time streaming (WebSockets) - async, high-concurrency
-- **Separation of Concerns**: Each backend does what it's best at
-
----
-
-## 🛠️ Tech Stack
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **Backend (Core)** | Django 5.0 + DRF | Authentication, data persistence |
-| **Backend (Streaming)** | FastAPI 0.100+ | WebSocket handling, real-time voice |
-| **Frontend** | Streamlit 1.28+ | Rapid prototyping, user interface |
-| **AI Framework** | Langchain + Langgraph | Agent orchestration, memory |
-| **LLM Models** | Ollama (Qwen, LLaMA) | Local AI inference |
-| **Database** | PostgreSQL 14+ | User data, sessions, agents |
-| **STT** | Deepgram API | Speech-to-text transcription |
-| **TTS** | Cartesia API + Browser | Text-to-speech synthesis |
-| **Testing** | Postman | API documentation & testing |
-
----
-
-## 🚀 Quick Start
+## 🛠️ Installation & Setup
 
 ### Prerequisites
+- Python 3.10+
+- [Ollama](https://ollama.com/) running locally
+- Deepgram & Cartesia API Keys
 
+### 1. Clone & Environment
 ```bash
-# Required
-Python 3.10+
-PostgreSQL 14+
-Ollama
+git clone https://github.com/IshaanAggrawal/asllp-voice.git
+cd asllp-voice
 
-# Optional (for full voice features)
-Deepgram API Key
-Cartesia API Key
-```
+# Create virtual environment
+python -m venv venv
 
-### 1. Install Ollama Models
+# Activate (Windows)
+.\venv\Scripts\activate
 
-```bash
-# Install Ollama from https://ollama.ai
-ollama pull qwen2:1.5b
-ollama pull llama3.2:1b
-```
-
-### 2. Setup Database
-
-```bash
-# Create PostgreSQL database
-createdb voice_orchestration
-
-# Or use Supabase (cloud PostgreSQL)
-# Get connection string from https://supabase.com
-```
-
-### 3. Configure Environment
-
-```bash
-# Backend environment
-cp backend/.env.example backend/.env
-
-# Edit backend/.env with your credentials:
-# - Database connection
-# - Deepgram API key
-# - Cartesia API key (optional)
-```
-
-### 4. Install Dependencies
-
-```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-
-# Frontend
-cd ../streamlit_app
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 5. Run Migrations
+### 2. Configure Environment (`backend/.env`)
+Create a `.env` file in `backend/`:
+```ini
+# Core
+DJANGO_SECRET_KEY=your-secret-key-here
+DEBUG=True
 
+# Voice APIs
+DEEPGRAM_API_KEY=your-deepgram-key
+CARTESIA_API_KEY=your-cartesia-key
+
+# AI Models (Ollama)
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_ORCHESTRATION_MODEL=qwen2.5:1.5b
+OLLAMA_CONVERSATIONAL_MODEL=llama3.2:1b
+```
+
+### 3. Initialize Database
 ```bash
 cd backend/django_app
 python manage.py migrate
+python manage.py createsuperuser
 ```
 
-### 6. Start Services
+### 4. Pull AI Models
+```bash
+ollama pull qwen2.5:1.5b
+ollama pull llama3.2:1b
+```
 
-**Terminal 1 - Django API**
+## 🏃‍♂️ Running the Platform
+
+Run these commands in **3 separate terminals**:
+
+**Terminal 1: Django Backend** (User/Data)
 ```bash
 cd backend/django_app
-python manage.py runserver
-# → http://localhost:8000
+python manage.py runserver 8000
 ```
 
-**Terminal 2 - FastAPI WebSocket**
+**Terminal 2: FastAPI Server** (Voice WebSockets)
 ```bash
 cd backend/fastapi_app
-uvicorn main:app --host 0.0.0.0 --port 8001 --reload
-# → http://localhost:8001
+uvicorn main:app --reload --port 8001
 ```
 
-**Terminal 3 - Streamlit UI**
+**Terminal 3: Streamlit Frontend** (UI)
 ```bash
 cd streamlit_app
 streamlit run app.py
-# → http://localhost:8501
 ```
 
-### 7. First Steps
+Access the app at: **http://localhost:8501**
 
-1. **Register**: Create account at http://localhost:8501
-2. **Login**: Authenticate with your credentials
-3. **Create Agent**: Define your first AI agent with custom prompt
-4. **Start Call**: Begin a voice conversation!
+## 📖 Usage Guide
 
----
+1.  **Login**: Use your superuser account or register a new one.
+2.  **Create Agent**: Go to "Create Agent" -> Name it -> Set Prompt (e.g., "You are a helpful travel guide").
+3.  **Start Call**: Go to "Voice Call" -> Select Agent -> "Start Session".
+4.  **Speak**: Allow mic access and talk. Interrupt anytime (Barge-in supported).
+5.  **Review**: Check the Dashboard for logs and session history.
 
-## 📚 API Documentation
+## 🧩 Architecture Flow
 
-### Postman Collection
-
-Import the complete API collection:
-
-**File**: `postman/Voice_Orchestration_API.postman_collection.json`
-
-**Includes**:
-- Authentication (Register, Login, Refresh Token)
-- Agent Management (CRUD operations)
-- Session Management (Create, List, End)
-- Health Checks (Django, FastAPI, Ollama)
-
-### Quick API Reference
-
-#### Authentication
-
-```bash
-# Register
-POST http://localhost:8000/api/auth/register/
-{
-  "username": "john_doe",
-  "email": "john@example.com",
-  "password": "SecurePass123!"
-}
-
-# Login
-POST http://localhost:8000/api/auth/login/
-{
-  "username": "john_doe",
-  "password": "SecurePass123!"
-}
-# Returns: { "access": "jwt_token", "refresh": "refresh_token" }
+```mermaid
+graph TD
+    User[User Microphone] -->|WebSocket Audio| FastAPI[FastAPI Server]
+    FastAPI -->|Stream| Deepgram[Deepgram STT]
+    Deepgram -->|Text| Orchestrator[Qwen 1.5B (Intent)]
+    Orchestrator -->|Intent + Context| Responder[LLaMA 1B (Response)]
+    Responder -->|Text Response| Cartesia[Cartesia TTS]
+    Cartesia -->|Audio Stream| User
+    
+    FastAPI -.->|Async Log| Django[Django ORM]
+    Django <-->|Persist| DB[(PostgreSQL/SQLite)]
 ```
-
-#### Agent Management
-
-```bash
-# Create Agent
-POST http://localhost:8000/api/agents/
-Authorization: Bearer {access_token}
-{
-  "name": "Customer Support Bot",
-  "system_prompt": "You are a helpful customer support agent...",
-  "orchestration_model": "qwen2:1.5b",
-  "conversation_model": "llama3.2:1b"
-}
-
-# List Agents
-GET http://localhost:8000/api/agents/
-Authorization: Bearer {access_token}
-```
-
-#### Voice Sessions
-
-```bash
-# Create Session
-POST http://localhost:8000/api/sessions/
-Authorization: Bearer {access_token}
-{
-  "agent_id": 1
-}
-# Returns: { "session_id": "uuid", "websocket_url": "ws://..." }
-
-# Connect WebSocket
-ws://localhost:8001/ws/voice/{session_id}
-```
-
-### WebSocket Protocol
-
-**Client → Server Messages**
-
-```javascript
-// Send agent configuration
-{
-  "type": "config",
-  "config": {
-    "name": "Agent Name",
-    "system_prompt": "Custom prompt..."
-  }
-}
-
-// Send audio chunk
-{
-  "type": "audio_chunk",
-  "data": "base64_encoded_audio",
-  "timestamp": 1234567890
-}
-```
-
-**Server → Client Messages**
-
-```javascript
-// Transcript received
-{
-  "type": "transcript",
-  "text": "Hello, how are you?",
-  "is_final": true
-}
-
-// Agent response
-{
-  "type": "agent_response",
-  "text": "I'm doing great! How can I help?",
-  "timestamp": "2024-02-14T10:30:00"
-}
-
-// Audio response (if TTS available)
-{
-  "type": "audio_response",
-  "audio": "base64_wav_data",
-  "format": "wav"
-}
-```
-
----
-
-## 📁 Project Structure
-
-```
-asllp-voice/
-├── backend/
-│   ├── django_app/              # Django REST API
-│   │   ├── authentication/      # User auth, JWT
-│   │   ├── agents/              # Agent CRUD
-│   │   ├── sessions/            # Session management
-│   │   └── manage.py
-│   │
-│   ├── fastapi_app/             # FastAPI WebSocket Server
-│   │   ├── agents/              # VoiceAgent class
-│   │   ├── integrations/        # Deepgram, Cartesia, Ollama
-│   │   ├── websocket_handler.py # Voice streaming logic
-│   │   └── main.py
-│   │
-│   ├── .env                     # Environment variables
-│   └── requirements.txt
-│
-├── streamlit_app/               # Streamlit Frontend
-│   ├── pages/                   # Multi-page app
-│   │   ├── login.py
-│   │   ├── dashboard.py
-│   │   ├── create_agent.py
-│   │   └── call.py
-│   ├── components/              # Reusable components
-│   │   └── voice_interface.py   # WebSocket client
-│   ├── app.py                   # Main entry point
-│   └── requirements.txt
-│
-├── postman/                     # API Collection
-│   └── Voice_Orchestration_API.postman_collection.json
-│
-└── README.md
-```
-
----
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-**Backend (`backend/.env`)**
-
-```bash
-# Database
-DB_NAME=voice_orchestration
-DB_USER=postgres
-DB_PASSWORD=your_password
-DB_HOST=localhost
-DB_PORT=5432
-
-# Django
-SECRET_KEY=your-secret-key-here
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
-
-# Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_ORCHESTRATION_MODEL=qwen2:1.5b
-OLLAMA_CONVERSATION_MODEL=llama3.2:1b
-
-# APIs
-DEEPGRAM_API_KEY=your_deepgram_key
-CARTESIA_API_KEY=your_cartesia_key  # Optional
-```
-
-### Model Configuration
-
-Edit `backend/fastapi_app/agents/voice_agent.py`:
-
-```python
-# Adjust temperature for different behaviors
-ORCHESTRATOR_TEMP = 0.3  # Lower = more consistent
-RESPONDER_TEMP = 0.7     # Higher = more creative
-```
-
----
-
-## 🧪 Testing
-
-### Run Verification Script
-
-```bash
-python setup_verify.py
-```
-
-This checks:
-- ✅ Python version
-- ✅ Ollama installation & models
-- ✅ PostgreSQL connection
-- ✅ Environment files
-- ✅ Dependencies
-- ✅ Django migrations
-- ✅ API endpoints
-
-### Manual Testing
-
-1. **API Tests**: Import Postman collection and run test sequence
-2. **Voice Test**: Use Streamlit UI to create agent and start call
-3. **WebSocket Test**: Open browser console and connect manually
-
----
-
-## 🚢 Deployment
-
-### Docker (Recommended)
-
-```bash
-# Build and run
-docker-compose up -d
-
-# Services will be available at:
-# - Django: http://localhost:8000
-# - FastAPI: http://localhost:8001
-# - Streamlit: http://localhost:8501
-```
-
-### Production Checklist
-
-- [ ] Set `DEBUG=False` in Django
-- [ ] Use strong `SECRET_KEY`
-- [ ] Configure CORS properly
-- [ ] Use production database (not SQLite)
-- [ ] Set up HTTPS/SSL
-- [ ] Configure rate limiting
-- [ ] Set up monitoring (Sentry, etc.)
-- [ ] Use production ASGI server (Gunicorn + Uvicorn)
-
----
-
-## 📖 Additional Documentation
-
-- [System Architecture Flow](brain/system_architecture_flow.md) - Detailed architecture explanation
-- [Walkthrough](brain/walkthrough.md) - Complete project walkthrough
-- [Submission Guide](SUBMISSION_GUIDE.md) - Assessment deliverables
-
----
-
-## 🤝 Contributing
-
-This project was created for the Artizence Systems LLP Technical Assessment.
-
-**Submitter**: Ishaan Aggrawal  
-**Date**: February 14, 2026  
-**GitHub**: Invite to `akshat0098`
-
----
 
 ## 📄 License
-
-MIT License - See LICENSE file for details
-
----
-
-## 🙏 Acknowledgments
-
-- **Ollama** - Local LLM inference
-- **Deepgram** - Speech-to-text API
-- **Cartesia** - Text-to-speech API
-- **Langchain** - AI agent framework
-
----
-
-**Demo**
-
-
+MIT License. Free to use and modify.
