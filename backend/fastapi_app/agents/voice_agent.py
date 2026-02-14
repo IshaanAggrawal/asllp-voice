@@ -155,6 +155,10 @@ Assistant:"""
             # Clean response
             response = response.strip()
             
+            # Remove potential HTML artifacts from small models
+            import re
+            response = re.sub(r'<[^>]+>', '', response)
+            
         except Exception as e:
             logger.error(f"Response generation failed: {e}")
             response = "I'm having trouble connecting to my brain right now. Please check if my models are running."
