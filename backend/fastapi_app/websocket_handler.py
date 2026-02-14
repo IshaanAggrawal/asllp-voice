@@ -8,7 +8,8 @@ import os
 import sys
 
 # Setup Django ORM for direct DB access
-sys.path.append(os.path.join(os.path.dirname(__file__), '../django_app'))
+django_app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../django_app'))
+sys.path.insert(0, django_app_path)
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 
 try:
@@ -22,7 +23,16 @@ except Exception as e:
     DJANGO_AVAILABLE = False
 
 # Import AI agents
-from agents.voice_agent import VoiceAgent
+# FIX: Namespace collision between 'fastapi_app/agents' and 'django_app/agents'
+# We must load the local VoiceAgent explicitly before modifying sys.path for Django
+import importlib.util
+voice_agent_path = os.path.join(os.path.dirname(__file__), 'agents', 'voice_agent.py')
+spec = importlib.util.spec_from_file_location("voice_agent_module", voice_agent_path)
+voice_agent_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(voice_agent_module)
+VoiceAgent = voice_agent_module.VoiceAgent
+
+# from agents.voice_agent import VoiceAgent  # conflicting import
 from integrations.ollama_client import OllamaClient
 from integrations.deepgram_client import DeepgramClient
 from integrations.cartesia_client import CartesiaClient
@@ -49,7 +59,7 @@ def get_cartesia():
 
 
 # Silence timeout: auto-end session if no data for this many seconds
-SILENCE_TIMEOUT_SECONDS = 30  # Increased to 30s based on user feedback
+SILENCE_TIMEOUT_SECONDS = 15  # 15s timeout AFTER agent finishes speaking
 
 # Transcript buffer delay: wait this long before processing accumulated transcripts
 TRANSCRIPT_BUFFER_DELAY = 2.0  # 2 seconds
@@ -58,6 +68,7 @@ TRANSCRIPT_BUFFER_DELAY = 2.0  # 2 seconds
 async def save_log_async(session_id, speaker, text, intent=None, latency=None):
     """Save conversation log to database asynchronously"""
     if not DJANGO_AVAILABLE:
+        logger.warning("Django not available, skipping log save")
         return
         
     try:
@@ -65,6 +76,9 @@ async def save_log_async(session_id, speaker, text, intent=None, latency=None):
         @sync_to_async
         def _create_log():
             try:
+                # Debugging log
+                # logger.info(f"Saving log for session {session_id}, speaker: {speaker}")
+                
                 session = ConversationSession.objects.get(id=session_id)
                 ConversationLog.objects.create(
                     session=session,
@@ -78,13 +92,13 @@ async def save_log_async(session_id, speaker, text, intent=None, latency=None):
                 session.total_turns += 1
                 session.save()
             except ConversationSession.DoesNotExist:
-                logger.warning(f"Session {session_id} not found for logging")
+                logger.error(f"Session {session_id} not found in DB - cannot log.")
             except Exception as e:
-                logger.error(f"DB Log Error: {e}")
+                logger.error(f"DB Log Error (Inside Sync): {e}", exc_info=True)
                 
         await _create_log()
     except Exception as e:
-        logger.error(f"Failed to save log: {e}")
+        logger.error(f"Failed to save log (Async wrapper): {e}", exc_info=True)
 
 
 async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_list, activity_state):
@@ -108,9 +122,14 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
     # ===== AI Agent Processing =====
     process_start = asyncio.get_event_loop().time()
     try:
+        # Check for cancellation before expensive call
+        # (This task might be cancelled if user interrupts)
         response = await voice_agent.process_turn(combined_transcript)
+    except asyncio.CancelledError:
+        logger.info("Agent processing cancelled (user interruption)")
+        raise
     except Exception as e:
-        logger.error(f"Agent processing failed: {e}")
+        logger.error(f"Agent processing failed: {e}", exc_info=True)
         response = "I'm sorry, I couldn't process that. Could you try again?"
     
     process_end = asyncio.get_event_loop().time()
@@ -122,11 +141,14 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
     await save_log_async(voice_agent.session_id, 'agent', response, latency=latency_ms)
     
     # Send text response
-    await websocket.send_json({
-        "type": "agent_response",
-        "text": response,
-        "timestamp": datetime.now().isoformat()
-    })
+    try:
+        await websocket.send_json({
+            "type": "agent_response",
+            "text": response,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+         logger.warning(f"Failed to send text response: {e}")
     
     # Mark activity after text response
     activity_state['last_active'] = asyncio.get_event_loop().time()
@@ -137,6 +159,7 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
         voice_id = voice_agent.agent_config.get('voice_id')
         logger.info(f"Synthesizing with voice_id: {voice_id}")
         
+        # This is blocking, but if task is cancelled, it will stop
         audio_bytes = await cartesia.synthesize(response, voice_id=voice_id)
         
         if audio_bytes and len(audio_bytes) > 0:
@@ -147,9 +170,20 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
                 "format": "wav",
                 "timestamp": datetime.now().isoformat()
             })
-            # Mark activity after audio response
-            activity_state['last_active'] = asyncio.get_event_loop().time()
             
+            # ESTIMATE DURATION to delay timeout
+            # Cartesia Sonic usually 16kHz or 24kHz, 16-bit mono.
+            # Conservative estimate: 32000 bytes/sec (16kHz).
+            # If we assume 32kB/s, we get a longer duration which is safer (prevents early timeout).
+            estimated_duration_sec = len(audio_bytes) / 32000.0
+            
+            # Mark activity as "now + duration" so timeout counts from AFTER speech
+            activity_state['last_active'] = asyncio.get_event_loop().time() + estimated_duration_sec
+            logger.info(f"Sent {len(audio_bytes)} bytes of audio. Extending timeout by {estimated_duration_sec:.2f}s")
+            
+    except asyncio.CancelledError:
+        logger.info("TTS synthesis cancelled (user interruption)")
+        raise
     except Exception as e:
         logger.debug(f"TTS synthesis skipped or failed: {e}")
 
@@ -157,16 +191,6 @@ async def process_transcript_buffer(websocket, voice_agent, cartesia, buffer_lis
 async def handle_voice_stream(websocket: WebSocket, session_id: str):
     """
     Main WebSocket handler for voice streaming
-    
-    Flow:
-    1. Browser captures microphone audio as WebM chunks
-    2. Audio is sent via WebSocket as base64
-    3. Deepgram STT converts audio to text  
-    4. VoiceAgent dual-layer (Qwen orchestrator + LLaMA responder) generates response
-    5. Cartesia TTS converts response to audio
-    6. Audio is sent back to browser for playback
-    
-    Auto-ends session after 6 seconds of silence (no audio detected).
     """
     
     # Initialize voice agent for this session
@@ -183,129 +207,138 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
         "message": "WebSocket connection established"
     })
     
-    
     # Track activity for smart silence detection
-    # We use a mutable dict so it can be updated by the processing task
     activity_state = {
         'last_active': asyncio.get_event_loop().time()
     }
     
-    # Transcript buffering: accumulate transcripts for 2s before processing
+    # Transcript buffering
     transcript_buffer = []
     last_transcript_time = None
-    transcript_task = None  # Task that will process buffer after delay
+    
+    # Track the active processing task for Barge-in (cancellation)
+    processing_task = None
+    transcript_wait_task = None
     
     try:
         while True:
-            # Wait for next message with a timeout
+            # POLL for messages with short timeout (1.0s)
+            # This allows checking silence timeout frequently even if no data comes
             try:
                 data = await asyncio.wait_for(
                     websocket.receive_text(),
-                    timeout=SILENCE_TIMEOUT_SECONDS
+                    timeout=1.0 
                 )
+                # Data received -> Reset silence timer
+                activity_state['last_active'] = asyncio.get_event_loop().time()
+                
             except asyncio.TimeoutError:
-                # Check if there was recent activity (e.g., agent speaking)
-                # that update()d the shared state
+                # Check for silence timeout
                 elapsed_since_active = asyncio.get_event_loop().time() - activity_state['last_active']
+                if elapsed_since_active > SILENCE_TIMEOUT_SECONDS:
+                    logger.info(f"Silence timeout ({SILENCE_TIMEOUT_SECONDS}s) — ending session {session_id}")
+                    await websocket.send_json({
+                        "type": "session_timeout",
+                        "message": "Session ended due to inactivity.",
+                        "reason": "silence_timeout"
+                    })
+                    break
+                # IDLE -> continue waiting
+                continue
+            
+            # --- Message Handling ---
+            try:
+                message = json.loads(data)
+            except json.JSONDecodeError:
+                continue
                 
-                if elapsed_since_active < SILENCE_TIMEOUT_SECONDS:
-                    # Agent was active recently, so we extend the session
-                    # logger.info(f"Silence timeout triggered, but agent was active {elapsed_since_active:.1f}s ago. Continuing.")
-                    continue
-                
-                # Truly no activity
-                logger.info(f"Silence timeout ({SILENCE_TIMEOUT_SECONDS}s) — auto-ending session {session_id}")
-                await websocket.send_json({
-                    "type": "session_timeout",
-                    "message": f"No audio detected for {SILENCE_TIMEOUT_SECONDS} seconds. Session ended automatically.",
-                    "reason": "silence_timeout"
-                })
-                break
-            
-            message = json.loads(data)
-            
-            # Reset activity on any user message
-            activity_state['last_active'] = asyncio.get_event_loop().time()
-            
             message_type = message.get("type")
-            # logger.info(f"Received message type: {message_type}")
             
             if message_type == "audio_chunk":
-                # ===== STEP 1: Decode audio from browser =====
                 audio_base64 = message.get("data", "")
-                
-                if not audio_base64:
+                if not audio_base64 or len(audio_base64) < 100:
                     continue
                 
                 try:
                     audio_data = base64.b64decode(audio_base64)
-                except Exception as e:
-                    logger.error(f"Failed to decode base64 audio: {e}")
+                except Exception:
                     continue
+
+                # BARGE-IN: If user sends audio, CANCEL any agent speaking/thinking
+                # But we only want to cancel if it's actual speech? 
+                # For responsiveness, we can cancel on audio, 
+                # OR we wait for VAD/Transcript. 
+                # Currently we rely on Deepgram to detect speech (transcript).
+                # To be safe, we wait for transcript.
                 
-                # Skip tiny chunks (likely silence or headers only)
-                if len(audio_data) < 500:
-                    continue
+                # ... OR we can trust the frontend VAD? 
+                # Let's cancel on Valid Transcript below.
                 
-                # Send processing indicator
-                await websocket.send_json({
-                    "type": "status",
-                    "text": "Processing audio..."
-                })
-                
-                # ===== STEP 2: Speech-to-Text with Deepgram =====
-                # Send WebM directly - Deepgram supports it natively!
+                # Transcribe
                 transcript = await deepgram.transcribe(audio_data, mime_type="audio/webm")
                 
                 if not transcript:
                     continue
-                
-                # Speech detected — reset activity
+
+                # VALID SPEECH DETECTED -> INTERRUPT AGENT
+                if processing_task and not processing_task.done():
+                    logger.info("User interrupted! Cancelling agent response.")
+                    processing_task.cancel()
+                    processing_task = None
+                    # Also clear any pending buffer
+                    transcript_buffer.clear()
+                    if transcript_wait_task and not transcript_wait_task.done():
+                        transcript_wait_task.cancel()
+                    
+                    # Notify frontend to stop playing audio (if supported)
+                    await websocket.send_json({"type": "interrupt"})
+
+                # Activity detected
                 activity_state['last_active'] = asyncio.get_event_loop().time()
                 
-                logger.info(f"Transcript: {transcript}")
-                
-                # Send transcript to frontend immediately (for display)
+                # Send transcript update
                 await websocket.send_json({
                     "type": "transcript",
                     "text": transcript,
                     "is_final": True
                 })
                 
-                # ===== BUFFERED PROCESSING =====
-                # Add to buffer and schedule processing after 2s delay
+                # Add to buffer
                 transcript_buffer.append(transcript)
                 last_transcript_time = asyncio.get_event_loop().time()
                 
-                # Cancel previous processing task if exists (user is still speaking)
-                if transcript_task and not transcript_task.done():
-                    transcript_task.cancel()
+                # Schedule processing (debounce)
+                if transcript_wait_task and not transcript_wait_task.done():
+                    transcript_wait_task.cancel()
                 
-                # Schedule new processing task after delay
-                async def delayed_process():
+                async def delayed_process_trigger():
                     await asyncio.sleep(TRANSCRIPT_BUFFER_DELAY)
-                    # Check if more transcripts came in during the delay
-                    if asyncio.get_event_loop().time() - last_transcript_time >= TRANSCRIPT_BUFFER_DELAY:
-                        # Process the buffer
-                        buffer_copy = transcript_buffer.copy()
-                        transcript_buffer.clear()
+                    if not transcript_buffer:
+                        return
                         
-                        # Process and get response, passing the shared activity state
-                        await process_transcript_buffer(websocket, voice_agent, cartesia, buffer_copy, activity_state)
+                    # Process buffer
+                    buffer_copy = transcript_buffer.copy()
+                    transcript_buffer.clear()
+                    
+                    # Start the heavy processing task
+                    # We store it in `processing_task` so we can cancel it next time
+                    nonlocal processing_task
+                    processing_task = asyncio.create_task(
+                        process_transcript_buffer(websocket, voice_agent, cartesia, buffer_copy, activity_state)
+                    )
                 
-                transcript_task = asyncio.create_task(delayed_process())
+                transcript_wait_task = asyncio.create_task(delayed_process_trigger())
                 
             elif message_type == "text_message":
-                # Handle text-only messages (for testing without audio)
                 text = message.get("text", "")
                 await save_log_async(session_id, 'user', text)
                 
-                # Process through voice agent
-                try:
-                    response = await voice_agent.process_turn(text)
-                except Exception:
-                    response = "Error processing text."
+                # Text also interrupts agent? Yes.
+                if processing_task and not processing_task.done():
+                    processing_task.cancel()
                 
+                # Direct process
+                response = await voice_agent.process_turn(text)
                 await save_log_async(session_id, 'agent', response)
                 
                 await websocket.send_json({
@@ -313,8 +346,6 @@ async def handle_voice_stream(websocket: WebSocket, session_id: str):
                     "text": response,
                     "timestamp": datetime.now().isoformat()
                 })
-                
-                # Mark agent activity
                 activity_state['last_active'] = asyncio.get_event_loop().time()
                 
             elif message_type == "end_stream":
