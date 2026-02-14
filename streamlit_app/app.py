@@ -144,6 +144,11 @@ st.markdown("""
         border: 1px solid var(--border);
         color: white;
     }
+
+    /* Hide default sidebar nav (fallback) */
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
