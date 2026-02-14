@@ -1,1 +1,4 @@
-# Agents package
+# Agents module
+from .voice_agent import VoiceAgent
+
+__all__ = ['VoiceAgent']

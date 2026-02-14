@@ -54,10 +54,12 @@ class ConversationSessionViewSet(viewsets.ModelViewSet):
     ViewSet for managing conversation sessions
     
     Endpoints:
-    - GET /api/sessions/ - List user's sessions
-    - POST /api/sessions/ - Create new session
-    - GET /api/sessions/{id}/ - Get session details
-    - PATCH /api/sessions/{id}/ - Update session (e.g., end session)
+    - GET /api/agents/sessions/ - List user's sessions
+    - POST /api/agents/sessions/ - Create new session
+    - GET /api/agents/sessions/{id}/ - Get session details
+    - PATCH /api/agents/sessions/{id}/ - Update session (e.g., end session)
+    - POST /api/agents/sessions/{id}/end_session/ - End a session
+    - GET /api/agents/sessions/{id}/logs/ - Get session logs
     """
     
     serializer_class = ConversationSessionSerializer
